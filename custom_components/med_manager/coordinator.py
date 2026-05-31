@@ -6,6 +6,8 @@ It is responsible for:
 - loading medication data from storage
 - evaluating medication schedules
 - determining medication state (not_due / due_soon / due / overdue)
+- handling snooze logic
+- preventing notification spam
 - triggering notifications via Home Assistant services
 """
 
@@ -13,7 +15,7 @@ import asyncio  # Used for continuous background loop timing
 
 from datetime import datetime, timezone  # Used for time calculations
 
-from homeassistant.core import HomeAssistant  # Home Assistant core system access
+from homeassistant.core import HomeAssistant  # Home Assistant system access
 
 from .storage import MedStorage  # Storage layer (single source of truth for meds)
 
@@ -25,6 +27,7 @@ class MedEngine:
     This engine continuously runs in the background and:
     - evaluates medication timing
     - calculates next dose state
+    - handles snooze logic
     - triggers notifications when needed
     """
 
@@ -35,8 +38,12 @@ class MedEngine:
         # Engine running flag (controls loop lifecycle)
         self.running = False
 
-        # Initialize storage layer (access to medication data)
+        # Initialize storage layer
         self.storage = MedStorage(hass)
+
+    # ---------------------------------------------------------
+    # ENGINE LIFECYCLE
+    # ---------------------------------------------------------
 
     async def async_start(self):
         """
@@ -54,7 +61,7 @@ class MedEngine:
         Stop the engine loop safely.
         """
 
-        # Set running flag to false (loop will exit naturally)
+        # Set running flag to false
         self.running = False
 
     async def _run_loop(self):
@@ -71,11 +78,15 @@ class MedEngine:
                 self._tick()
 
             except Exception as err:
-                # Catch unexpected errors so engine never crashes HA
+                # Prevent crash of Home Assistant
                 print(f"[MED ENGINE ERROR] {err}")
 
             # Delay between evaluation cycles
             await asyncio.sleep(30)
+
+    # ---------------------------------------------------------
+    # MAIN ENGINE CYCLE
+    # ---------------------------------------------------------
 
     def _tick(self):
         """
@@ -115,17 +126,30 @@ class MedEngine:
 
             status = self._calculate_status(med, now)
 
-            # Debug output for development visibility
+            # Save computed status back into storage (future UI support)
+            med["status"] = status
+
+            self.storage.update_med(med_id, med)
+
+            # Debug output
             print(f"[MED ENGINE] {med_id} -> {status}")
 
             # -----------------------------------------------------
             # NOTIFICATION LOGIC
             # -----------------------------------------------------
 
-            # If medication requires attention, trigger alert
-            if status in ["due", "due_soon", "overdue"]:
+            # Check if medication requires notification
+            if self._should_notify(med, status, now):
 
                 self._send_notification(med_id, med, status)
+
+                # Update notification timestamp
+                med["last_notified"] = now.timestamp()
+                self.storage.update_med(med_id, med)
+
+    # ---------------------------------------------------------
+    # STATE CALCULATION
+    # ---------------------------------------------------------
 
     def _calculate_status(self, med, now):
         """
@@ -136,74 +160,95 @@ class MedEngine:
         # INPUT DATA
         # ---------------------------------------------------------
 
-        # Last time medication was taken (timestamp)
+        # Last time medication was taken
         last_taken = med.get("last_taken")
 
-        # Interval between doses in hours
+        # Dose interval in hours
         interval_hours = med.get("interval_hours")
+
+        # Snooze timestamp (if any)
+        snooze_until = med.get("snooze_until")
 
         # ---------------------------------------------------------
         # VALIDATION STATE
         # ---------------------------------------------------------
 
-        # If medication has never been taken
         if not last_taken:
             return "not_initialized"
 
-        # If interval is missing or invalid
         if not interval_hours:
             return "invalid_interval"
+
+        # ---------------------------------------------------------
+        # SNOOZE LOGIC
+        # ---------------------------------------------------------
+
+        # If snoozed and still active
+        if snooze_until and now.timestamp() < snooze_until:
+            return "snoozed"
 
         # ---------------------------------------------------------
         # TIME CALCULATION
         # ---------------------------------------------------------
 
-        # Convert hours to seconds for calculation
         interval_seconds = interval_hours * 3600
 
-        # Calculate next scheduled dose time
         next_due = last_taken + interval_seconds
 
-        # Calculate time difference from now
         time_to_due = next_due - now.timestamp()
 
         # ---------------------------------------------------------
         # STATE LOGIC
         # ---------------------------------------------------------
 
-        # If overdue beyond 1 hour
         if time_to_due < -3600:
             return "overdue"
 
-        # If currently due or slightly late
         if time_to_due <= 0:
             return "due"
 
-        # If due within next hour
         if time_to_due <= 3600:
             return "due_soon"
 
-        # Otherwise medication is safely scheduled
         return "not_due"
+
+    # ---------------------------------------------------------
+    # NOTIFICATION CONTROL (ANTI-SPAM LOGIC)
+    # ---------------------------------------------------------
+
+    def _should_notify(self, med, status, now):
+        """
+        Determines whether notification should be sent.
+        """
+
+        if status not in ["due", "due_soon", "overdue"]:
+            return False
+
+        last_notified = med.get("last_notified")
+
+        if not last_notified:
+            return True
+
+        # 15 minute cooldown
+        return (now.timestamp() - last_notified) > 900
+
+    # ---------------------------------------------------------
+    # NOTIFICATION SYSTEM
+    # ---------------------------------------------------------
 
     def _send_notification(self, med_id, med, status):
         """
         Send notification via Home Assistant.
 
-        Currently uses persistent notifications.
-        Future upgrade: mobile_app push notifications.
+        Current: persistent notifications
+        Future: mobile_app, SMS, voice assistants
         """
 
-        # Get human-readable medication name
         name = med.get("name", med_id)
 
-        # Build notification message
         message = f"Medication '{name}' is {status}"
 
-        # ---------------------------------------------------------
-        # HOME ASSISTANT NOTIFICATION CALL
-        # ---------------------------------------------------------
-
+        # Home Assistant notification call
         self.hass.services.call(
             "persistent_notification",
             "create",
@@ -213,5 +258,4 @@ class MedEngine:
             }
         )
 
-        # Debug log for development
         print(f"[MED NOTIFY] {med_id} -> {status}")
