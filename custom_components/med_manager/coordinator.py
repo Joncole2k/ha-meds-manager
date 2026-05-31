@@ -1,4 +1,5 @@
-"""HA Meds Manager - Final Medication Engine
+"""
+HA Meds Manager - Final Medication Engine
 
 This file is the CORE EXECUTION ENGINE for the entire system.
 
@@ -98,7 +99,6 @@ class MedEngine:
                 self._tick()
 
             except Exception as err:
-                # Never crash Home Assistant
                 print(f"[MED ENGINE ERROR] {err}")
 
             await asyncio.sleep(30)
@@ -108,9 +108,7 @@ class MedEngine:
     # ---------------------------------------------------------
 
     def _tick(self):
-        """
-        Evaluate all medications in system.
-        """
+        """Evaluate all medications in system."""
 
         # ---------------------------------------------------------
         # TIME SOURCE
@@ -137,14 +135,16 @@ class MedEngine:
             # Evaluate full medication state
             state = self._evaluate(med, now)
 
-            # Persist engine results into storage (UI + entity layer)
+            # -----------------------------------------------------
+            # PERSIST ENGINE OUTPUT (UI + ENTITY LAYER)
+            # -----------------------------------------------------
+
             med["status"] = state["status"]
             med["next_due"] = state["next_due"]
-            med["refill_flag"] = state["refill_flag"]
+            med["refill_required"] = state["refill_required"]
 
             self.storage.update_med(med_id, med)
 
-            # Debug output
             print(f"[MED ENGINE] {med_id} -> {state['status']}")
 
             # -----------------------------------------------------
@@ -159,8 +159,6 @@ class MedEngine:
 
             if state["should_notify"]:
                 self._notify(med_id, med, state["status"])
-
-                # update notification tracking
                 self.storage.mark_notified(med_id, now.timestamp())
 
     # ---------------------------------------------------------
@@ -170,11 +168,6 @@ class MedEngine:
     def _evaluate(self, med, now):
         """
         Compute full medication state.
-
-        Output is structured for:
-        - engine decisions
-        - UI entities
-        - automations
         """
 
         # ---------------------------------------------------------
@@ -188,12 +181,15 @@ class MedEngine:
         current_count = med.get("current_count", 0)
         low_stock_threshold = med.get("low_stock_threshold", 0)
 
-        # Default response structure
+        # ---------------------------------------------------------
+        # OUTPUT STRUCTURE
+        # ---------------------------------------------------------
+
         result = {
             "status": "unknown",
             "next_due": None,
             "should_notify": False,
-            "refill_flag": False
+            "refill_required": False
         }
 
         # ---------------------------------------------------------
@@ -209,7 +205,7 @@ class MedEngine:
         # ---------------------------------------------------------
 
         if current_count <= low_stock_threshold:
-            result["refill_flag"] = True
+            result["refill_required"] = True
 
         # ---------------------------------------------------------
         # SNOOZE SYSTEM
@@ -221,7 +217,7 @@ class MedEngine:
             return result
 
         # ---------------------------------------------------------
-        # SCHEDULING SYSTEM (ROLLING MODEL)
+        # SCHEDULING SYSTEM
         # ---------------------------------------------------------
 
         interval_seconds = interval_hours * 3600
@@ -248,14 +244,13 @@ class MedEngine:
             result["status"] = "not_due"
 
         # ---------------------------------------------------------
-        # NOTIFICATION GATING (ANTI-SPAM)
+        # NOTIFICATION GATING
         # ---------------------------------------------------------
 
         if result["status"] in ["due", "due_soon", "overdue"]:
 
             if not last_notified:
                 result["should_notify"] = True
-
             else:
                 if now.timestamp() - last_notified > 900:
                     result["should_notify"] = True
@@ -267,11 +262,9 @@ class MedEngine:
     # ---------------------------------------------------------
 
     def _notify(self, med_id, med, status):
-        """
-        Send Home Assistant notification.
-        """
+        """Send Home Assistant notification."""
 
-        name = med.get("name", med_id)
+        name = med.get("common_name", med_id)
 
         message = f"Medication '{name}' is {status}"
 
@@ -287,16 +280,11 @@ class MedEngine:
         print(f"[MED NOTIFY] {med_id} -> {status}")
 
     # ---------------------------------------------------------
-    # EVENT SYSTEM (FUTURE AUTOMATIONS / ENTITIES)
+    # EVENT SYSTEM
     # ---------------------------------------------------------
 
     def _emit_event(self, med_id, state):
-        """
-        Emits structured event for future:
-        - automations
-        - entity sync
-        - dashboard updates
-        """
+        """Emit structured event for automations + UI."""
 
         event_type = f"med_manager_{state['status']}"
 
@@ -306,6 +294,6 @@ class MedEngine:
                 "med_id": med_id,
                 "status": state["status"],
                 "next_due": state["next_due"],
-                "refill_flag": state.get("refill_flag", False)
+                "refill_required": state.get("refill_required", False)
             }
         )
