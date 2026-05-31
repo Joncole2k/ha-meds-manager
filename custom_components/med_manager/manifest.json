@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "documentation": "https://github.com/Joncole2k/ha-meds-manager",
   "issue_tracker": "https://github.com/Joncole2k/ha-meds-manager/issues",
-  "homeassistant": "2025.1.0"
+  "homeassistant": "2025.1.0",
   "dependencies": [],
   "codeowners": [],
   "requirements": [],
