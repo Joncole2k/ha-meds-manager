@@ -1,78 +1,90 @@
 """Medication Engine (core scheduler loop).
 
-This engine continuously evaluates medication schedules and determines:
-- not_due
-- due_soon
-- due
-- overdue
+This file is the core brain of HA Meds Manager.
+
+It is responsible for:
+- continuously evaluating medication schedules
+- reading medication data from storage
+- determining medication states (due / not_due / overdue)
 """
 
-import asyncio
-from datetime import datetime, timezone
+import asyncio  # Used for running continuous background loop
 
-from homeassistant.core import HomeAssistant
+from datetime import datetime, timezone  # Used for time-based calculations
 
-from .storage import MedStorage  # Storage layer (single source of truth)
+from homeassistant.core import HomeAssistant  # Home Assistant core reference
+
+from .storage import MedStorage  # Import storage layer (single source of truth)
 
 
 class MedEngine:
     """
     Core medication scheduling engine.
 
-    This runs continuously and evaluates medication timing state.
+    This engine continuously evaluates medication timing
+    and produces status updates.
     """
 
     def __init__(self, hass: HomeAssistant):
-        # Home Assistant instance reference
+        # Store Home Assistant instance reference
         self.hass = hass
 
-        # Controls whether engine loop is running
+        # Flag controlling whether engine loop is running
         self.running = False
 
-        # Storage layer instance
+        # Initialize storage layer
         self.storage = MedStorage(hass)
 
     async def async_start(self):
         """
-        Start the engine loop.
+        Starts the background engine loop.
         """
+
+        # Set running flag to true
         self.running = True
 
-        # Start background async task
+        # Start async background loop inside Home Assistant event loop
         self.hass.loop.create_task(self._run_loop())
 
     async def async_stop(self):
         """
-        Stop the engine loop.
+        Stops the engine loop safely.
         """
+
+        # Set running flag to false to exit loop
         self.running = False
 
     async def _run_loop(self):
         """
-        Continuous evaluation loop.
+        Main continuous execution loop.
 
-        Runs every 30 seconds while integration is active.
+        This runs indefinitely while the integration is active.
         """
+
         while self.running:
 
             try:
+                # Run one evaluation cycle
                 self._tick()
+
             except Exception as err:
+                # Catch and log any engine errors
                 print(f"[MED ENGINE ERROR] {err}")
 
+            # Wait before next evaluation cycle
             await asyncio.sleep(30)
 
     def _tick(self):
         """
         Single evaluation cycle.
 
-        This evaluates all medications in storage.
+        This processes all medications and computes their state.
         """
 
-        # Current UTC time for all calculations
+        # Get current UTC time for all calculations
         now = datetime.now(timezone.utc)
 
-        # Load all medications from storage
+        # Retrieve all medication data from storage
         meds = self.storage.get_all()
 
         # If no medications exist, exit safely
@@ -80,52 +92,54 @@ class MedEngine:
             print("[MED ENGINE] No medications found.")
             return
 
-        # Evaluate each medication
+        # Loop through each medication entry
         for med_id, med in meds.items():
 
+            # Calculate current status for this medication
             status = self._calculate_status(med, now)
 
+            # Debug output for development visibility
             print(f"[MED ENGINE] {med_id} -> {status}")
 
     def _calculate_status(self, med, now):
         """
-        Determine medication state using improved logic.
+        Determines medication state based on timing rules.
         """
 
-        # Last time medication was taken
+        # Retrieve last taken timestamp (if exists)
         last_taken = med.get("last_taken")
 
-        # Dose interval in hours
+        # Retrieve dosing interval in hours
         interval_hours = med.get("interval_hours")
 
         # If medication has never been taken
         if not last_taken:
             return "not_initialized"
 
-        # Convert interval to seconds
+        # Convert interval to seconds for calculation
         interval_seconds = interval_hours * 3600
 
-        # Compute next due timestamp
+        # Compute next scheduled dose time
         next_due = last_taken + interval_seconds
 
-        # Time difference between now and next dose
+        # Compute time difference between now and next dose
         time_to_due = next_due - now.timestamp()
 
         # ---------------------------------------------------------
         # STATE LOGIC
         # ---------------------------------------------------------
 
-        # If we're past the due time by more than 1 hour
+        # If overdue by more than 1 hour
         if time_to_due < -3600:
             return "overdue"
 
-        # If we are past or at due time
+        # If currently due or slightly past due
         if time_to_due <= 0:
             return "due"
 
-        # If medication is due within next 60 minutes
+        # If due within next hour
         if time_to_due <= 3600:
             return "due_soon"
 
-        # Otherwise still safely scheduled
+        # Otherwise medication is not due yet
         return "not_due"
