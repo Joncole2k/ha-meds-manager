@@ -135,12 +135,19 @@ async def async_setup_entry(hass: HomeAssistant, entry):
         hass.bus.fire(event_type, data)
 
     # Listen to engine events
-    hass.bus.async_listen("med_manager_*", _event_listener)
-    # hass.bus.listen("med_manager_due", _event_listener)
-    # hass.bus.listen("med_manager_due_soon", _event_listener)
-    # hass.bus.listen("med_manager_overdue", _event_listener)
-    # hass.bus.listen("med_manager_snoozed", _event_listener)
+    hass.bus.async_listen("med_manager_due", _event_listener)
+    hass.bus.async_listen("med_manager_due_soon", _event_listener)
+    hass.bus.async_listen("med_manager_overdue", _event_listener)
+    hass.bus.async_listen("med_manager_snoozed", _event_listener)
 
+    # ---------------------------------------------------------
+    # CRITICAL: FORWARD TO SENSOR PLATFORM
+    # ---------------------------------------------------------
+    await hass.config_entries.async_forward_entry_setups(
+        entry,
+        ["sensor"]
+    )
+    
     # ---------------------------------------------------------
     # FINAL STARTUP CONFIRMATION
     # ---------------------------------------------------------
