@@ -1,0 +1,9 @@
+{
+  "domain": "med_manager",
+  "name": "HA Meds Manager",
+  "version": "0.1.0",
+  "documentation": "",
+  "dependencies": [],
+  "codeowners": [],
+  "requirements": []
+}
