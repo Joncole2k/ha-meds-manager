@@ -129,7 +129,7 @@ async def async_setup(hass: HomeAssistant, config: dict):
         print(f"[MED SERVICE] SNOOZE -> {med_id} ({minutes} min)")
 
     # ---------------------------------------------------------
-    # FUTURE SERVICE HOOKS (PLACEHOLDER EXTENSIONS)
+    # FUTURE SERVICE HOOK: REFILL
     # ---------------------------------------------------------
 
     async def handle_refill(call: ServiceCall):
@@ -145,26 +145,12 @@ async def async_setup(hass: HomeAssistant, config: dict):
     # REGISTER SERVICES WITH HOME ASSISTANT
     # ---------------------------------------------------------
 
-    hass.services.async_register(
-        DOMAIN,
-        "take",
-        handle_take
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        "snooze",
-        handle_snooze
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        "refill",
-        handle_refill
-    )
+    hass.services.async_register(DOMAIN, "take", handle_take)
+    hass.services.async_register(DOMAIN, "snooze", handle_snooze)
+    hass.services.async_register(DOMAIN, "refill", handle_refill)
 
     # ---------------------------------------------------------
-    # EVENT SYSTEM REGISTRATION
+    # EVENT SYSTEM REGISTRATION (FULL PRESERVED STRUCTURE)
     # ---------------------------------------------------------
 
     hass.data[DOMAIN]["events"] = {
@@ -176,20 +162,24 @@ async def async_setup(hass: HomeAssistant, config: dict):
     }
 
     # ---------------------------------------------------------
-    # ENGINE EVENT BRIDGE (OPTIONAL EXTENSION HOOK)
+    # ENGINE EVENT BRIDGE
     # ---------------------------------------------------------
 
     def _event_listener(event):
         """
-        Future automation bridge.
+        Bridge engine events into Home Assistant event bus.
 
-        This will later connect:
-        engine events → HA automations → UI updates
+        Future:
+        - automation triggers
+        - UI updates
+        - entity synchronization
         """
 
         print(f"[MED EVENT] {event.event_type} -> {event.data}")
 
-    # Listen to all med_manager events
+        hass.bus.fire(event.event_type, event.data)
+
+    # Listen to all engine events
     hass.bus.listen("med_manager_due", _event_listener)
     hass.bus.listen("med_manager_due_soon", _event_listener)
     hass.bus.listen("med_manager_overdue", _event_listener)
