@@ -1,37 +1,48 @@
 """HA Meds Manager Storage Layer.
 
-This file handles how medication data is stored and retrieved.
+This file manages all medication data storage.
 
-We use hass.data for runtime persistence (in-memory during runtime).
-Later this will be upgraded to persistent Home Assistant storage.
+Current design:
+- Uses hass.data for runtime persistence
+- Automatically seeds demo data if storage is empty (for testing)
+- Will later migrate to Home Assistant Store API for persistence
 """
 
-from homeassistant.core import HomeAssistant  # Core Home Assistant access
+from datetime import datetime, timezone  # Used for generating demo timestamps
+
+from homeassistant.core import HomeAssistant  # Home Assistant core access
 
 
-# DOMAIN is the key used inside hass.data to store integration data
+# DOMAIN key used inside hass.data
 DOMAIN = "med_manager"
 
 
 class MedStorage:
     """
-    Storage wrapper for medication data.
+    Storage layer for medication data.
 
-    This class is responsible for:
-    - retrieving medication data
-    - updating medication data
-    - managing medication state changes
+    Responsible for:
+    - storing medication records
+    - retrieving medication records
+    - updating medication records
+    - providing initial demo data for testing
     """
 
     def __init__(self, hass: HomeAssistant):
-        # Reference to Home Assistant instance
+        # Store Home Assistant reference
         self.hass = hass
 
-        # Ensure integration storage exists
+        # Ensure integration storage exists in hass.data
         self.hass.data.setdefault(DOMAIN, {})
 
         # Ensure medication container exists
         self.hass.data[DOMAIN].setdefault("medications", {})
+
+        # ---------------------------------------------------------
+        # AUTO-SEED DEMO DATA (ONLY IF EMPTY)
+        # ---------------------------------------------------------
+        if not self.hass.data[DOMAIN]["medications"]:
+            self._seed_demo_data()
 
     def get_all(self):
         """
@@ -41,44 +52,62 @@ class MedStorage:
 
     def set_all(self, data):
         """
-        Replace entire medication dataset.
+        Replace all medication records.
         """
         self.hass.data[DOMAIN]["medications"] = data
 
     def get_med(self, med_id):
         """
-        Get a single medication by ID.
+        Retrieve a single medication by ID.
         """
         return self.hass.data[DOMAIN]["medications"].get(med_id)
 
     def update_med(self, med_id, med_data):
         """
-        Update or create a medication entry.
+        Update or create medication entry.
         """
         self.hass.data[DOMAIN]["medications"][med_id] = med_data
 
-    # ---------------------------------------------------------
-    # NEW FUNCTION: mark medication as taken
-    # ---------------------------------------------------------
     def mark_taken(self, med_id, timestamp):
         """
         Mark a medication as taken.
 
         This updates:
         - last_taken timestamp
-
-        This is the core mutation point for the system.
         """
 
-        # Get existing medication entry
+        # Retrieve medication entry
         med = self.get_med(med_id)
 
-        # If medication does not exist, do nothing safely
+        # If medication does not exist, exit safely
         if not med:
+            print(f"[MED STORAGE] Medication not found: {med_id}")
             return
 
-        # Update last_taken timestamp
+        # Update last_taken time
         med["last_taken"] = timestamp
 
-        # Save updated record back into storage
+        # Save updated record
         self.update_med(med_id, med)
+
+    def _seed_demo_data(self):
+        """
+        Create initial demo medication data.
+
+        This allows the system to run immediately after install
+        without requiring user configuration.
+        """
+
+        # Current UTC time for baseline calculations
+        now = datetime.now(timezone.utc).timestamp()
+
+        # Create sample medication entry
+        self.hass.data[DOMAIN]["medications"] = {
+            "jonathan_001": {
+                "name": "Demo Medication",
+                "last_taken": now - 7200,  # taken 2 hours ago
+                "interval_hours": 6
+            }
+        }
+
+        print("[MED STORAGE] Demo medication data initialized.")
