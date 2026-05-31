@@ -47,8 +47,8 @@ DOMAIN = "med_manager"
 # ---------------------------------------------------------
 # INTEGRATION SETUP ENTRYPOINT
 # ---------------------------------------------------------
-async def async_setup(hass: HomeAssistant, config: dict):
-    """Initialize Meds Manager integration."""
+async def async_setup_entry(hass: HomeAssistant, entry):
+    """Initialize Meds Manager from UI (HACS install path)."""
 
     # ---------------------------------------------------------
     # CORE NAMESPACE INITIALIZATION
