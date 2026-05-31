@@ -1,8 +1,9 @@
-"""HA Meds Manager - Storage Layer (FINAL PRODUCT MODEL)
+"""
+HA Meds Manager - Storage Layer (FINAL PRODUCT MODEL)
 
 This file defines the COMPLETE medication data structure used across:
 - Engine (scheduling + evaluation)
-- Services (take / snooze)
+- Services (take / snooze / refill / create / delete)
 - Notifications
 - Future entities (sensor.med_*)
 - Future UI dashboards (Lovelace cards)
@@ -66,15 +67,7 @@ class MedStorage:
     # ---------------------------------------------------------
 
     def mark_taken(self, med_id, timestamp):
-        """
-        User action: medication taken.
-
-        Updates:
-        - last_taken
-        - clears snooze
-        - resets notification state if needed
-        """
-
+        """User action: medication taken."""
         med = self.get_med(med_id)
         if not med:
             return
@@ -85,23 +78,16 @@ class MedStorage:
         self.update_med(med_id, med)
 
     def snooze(self, med_id, until_timestamp):
-        """
-        User action: snooze medication alerts.
-        """
-
+        """User action: snooze medication alerts."""
         med = self.get_med(med_id)
         if not med:
             return
 
         med["snooze_until"] = until_timestamp
-
         self.update_med(med_id, med)
 
     def mark_notified(self, med_id, timestamp):
-        """
-        Engine action: tracks notifications to prevent spam.
-        """
-
+        """Engine action: tracks notifications to prevent spam."""
         med = self.get_med(med_id)
         if not med:
             return
@@ -112,20 +98,39 @@ class MedStorage:
         self.update_med(med_id, med)
 
     # ---------------------------------------------------------
+    # INVENTORY / REFILL SYSTEM
+    # ---------------------------------------------------------
+
+    def refill(self, med_id, amount):
+        """Update medication inventory after refill."""
+        med = self.get_med(med_id)
+        if not med:
+            return
+
+        med["current_count"] = amount
+        med["refill_required"] = False
+
+        self.update_med(med_id, med)
+
+    # ---------------------------------------------------------
+    # CREATE / DELETE MEDICATION
+    # ---------------------------------------------------------
+
+    def create_medication(self, med_id, data):
+        """Create a new medication entry."""
+        self.hass.data[DOMAIN]["medications"][med_id] = data
+
+    def delete_medication(self, med_id):
+        """Delete medication entry."""
+        if med_id in self.hass.data[DOMAIN]["medications"]:
+            del self.hass.data[DOMAIN]["medications"][med_id]
+
+    # ---------------------------------------------------------
     # DEMO DATA (FULL SYSTEM SCHEMA)
     # ---------------------------------------------------------
 
     def _seed_demo_data(self):
-        """
-        Creates full schema example medication.
-
-        This defines ALL fields required for:
-        - engine scheduling
-        - notifications
-        - snooze
-        - UI
-        - future entity mapping
-        """
+        """Creates full schema example medication."""
 
         now = datetime.now(timezone.utc).timestamp()
 
@@ -134,9 +139,9 @@ class MedStorage:
                 # -------------------------------------------------
                 # IDENTITY LAYER
                 # -------------------------------------------------
-                "name": "Tylenol",
+                "common_name": "Tylenol",
                 "generic_name": "acetaminophen",
-                "brand": "Equate",
+                "brand_name": "Equate",
                 "person": "jonathan",
 
                 # -------------------------------------------------
