@@ -34,7 +34,7 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .storage import MedStorage
 
@@ -71,19 +71,21 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=False)
 
     # ---------------------------------------------------------
-    # DISPATCHER UPDATE HOOK
+    # DISPATCHER UPDATE HOOK (FIXED)
     # ---------------------------------------------------------
     def _handle_update():
-        """Notify all entities to refresh state."""
-        async_dispatcher_send(hass, SIGNAL_UPDATE)
+        """Force all entities to refresh state."""
+        for entity in entities:
+            entity._refresh()
+            entity.async_write_ha_state()
 
+    # Register dispatcher listener properly
     entry.async_on_unload(
-        async_dispatcher_connect(hass, SIGNAL_UPDATE, lambda _: None)
-    )
-
-    # attach proper listener per entity set refresh trigger
-    entry.async_on_unload(
-        async_dispatcher_connect(hass, SIGNAL_UPDATE, lambda _: None)
+        async_dispatcher_connect(
+            hass,
+            SIGNAL_UPDATE,
+            lambda _: _handle_update()
+        )
     )
 
 
@@ -156,7 +158,7 @@ class MedSensor(SensorEntity):
             )
         )
 
-    async def _handle_dispatch_update(self):
+    async def _handle_dispatch_update(self, *_):
         """Triggered when engine broadcasts update."""
         self._refresh()
         self.async_write_ha_state()
