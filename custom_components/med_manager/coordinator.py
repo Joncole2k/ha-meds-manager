@@ -1,10 +1,11 @@
 """Medication Engine (core scheduler loop).
 
 This is the brain of the system.
-It will:
-- continuously evaluate medication schedules
-- calculate next dose times
-- determine due / not due / snoozed states
+
+It is responsible for:
+- continuously evaluating medication schedules
+- determining due / not due states
+- logging status updates
 """
 
 import asyncio
@@ -12,42 +13,47 @@ from datetime import datetime, timezone
 
 from homeassistant.core import HomeAssistant
 
+from .storage import MedStorage  # Import storage layer
+
 
 class MedEngine:
     """
     Core medication scheduling engine.
 
-    Runs continuously in the background and evaluates medication state.
+    This runs continuously and evaluates medication state
+    from persistent storage.
     """
 
     def __init__(self, hass: HomeAssistant):
-        # Reference to Home Assistant instance
+        # Reference to Home Assistant core instance
         self.hass = hass
 
-        # Controls whether the engine loop is running
+        # Flag controlling engine loop execution
         self.running = False
 
-        # In-memory placeholder for medication data (temporary)
-        self.data = {}
+        # Initialize storage layer (single source of truth)
+        self.storage = MedStorage(hass)
 
     async def async_start(self):
         """
-        Called by __init__.py to start the engine.
+        Start the engine background loop.
         """
         self.running = True
 
-        # Start background loop task
+        # Start async loop task inside Home Assistant event loop
         self.hass.loop.create_task(self._run_loop())
 
     async def async_stop(self):
-        """Stops the engine loop."""
+        """
+        Stop the engine loop safely.
+        """
         self.running = False
 
     async def _run_loop(self):
         """
-        Main engine loop.
+        Continuous evaluation loop.
 
-        Runs forever (until stopped) and recalculates medication states.
+        Runs forever while integration is active.
         """
         while self.running:
 
@@ -56,57 +62,55 @@ class MedEngine:
             except Exception as err:
                 print(f"[MED ENGINE ERROR] {err}")
 
-            # Engine update interval (we will tune later)
+            # Engine cycle delay (we will tune later)
             await asyncio.sleep(30)
 
     def _tick(self):
         """
         Single evaluation cycle.
 
-        This is where ALL medication logic will eventually live.
+        This processes ALL medications in storage.
         """
 
+        # Current UTC time used for all calculations
         now = datetime.now(timezone.utc)
 
-        # TEMP: mock data until storage layer is built
-        meds = self._load_mock_data()
+        # Load real medication data from storage
+        meds = self.storage.get_all()
 
+        # If no medications exist, safely do nothing
+        if not meds:
+            print("[MED ENGINE] No medications found in storage.")
+            return
+
+        # Evaluate each medication entry
         for med_id, med in meds.items():
 
             status = self._calculate_status(med, now)
 
+            # Debug output (temporary until entity system is built)
             print(f"[MED ENGINE] {med_id} -> {status}")
 
     def _calculate_status(self, med, now):
         """
-        Basic placeholder logic for medication state.
+        Calculate medication state based on schedule.
         """
 
-        last_taken = med["last_taken"]
-        interval_hours = med["interval_hours"]
+        # Last time medication was taken
+        last_taken = med.get("last_taken")
 
+        # Interval between doses (hours)
+        interval_hours = med.get("interval_hours")
+
+        # If no last_taken exists, medication is not initialized
         if not last_taken:
             return "not_initialized"
 
+        # Compute next due timestamp
         next_due = last_taken + (interval_hours * 3600)
 
+        # Determine if medication is due
         if now.timestamp() >= next_due:
             return "due"
 
         return "not_due"
-
-    def _load_mock_data(self):
-        """
-        Temporary data source.
-
-        Will be replaced by persistent storage in next step.
-        """
-
-        now = datetime.now(timezone.utc)
-
-        return {
-            "jonathan_001": {
-                "last_taken": now.timestamp() - 7200,  # 2 hours ago
-                "interval_hours": 6
-            }
-        }
