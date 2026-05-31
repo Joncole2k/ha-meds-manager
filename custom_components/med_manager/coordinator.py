@@ -39,13 +39,12 @@ UI / DASHBOARD SYSTEM
 - prepares structured state output
 """
 
-import asyncio  # async loop for continuous execution
+import asyncio
+from datetime import datetime, timezone
 
-from datetime import datetime, timezone  # time calculations
+from homeassistant.core import HomeAssistant
 
-from homeassistant.core import HomeAssistant  # HA system access
-
-from .storage import MedStorage  # central data source
+from .storage import MedStorage
 
 
 # ---------------------------------------------------------
@@ -66,13 +65,8 @@ class MedEngine:
     """
 
     def __init__(self, hass: HomeAssistant):
-        # Home Assistant instance reference
         self.hass = hass
-
-        # Engine lifecycle flag
         self.running = False
-
-        # Storage connection
         self.storage = MedStorage(hass)
 
     # ---------------------------------------------------------
@@ -81,23 +75,18 @@ class MedEngine:
 
     async def async_start(self):
         """Start engine loop."""
-
         self.running = True
-        self.hass.loop.create_task(self._run_loop())
+        asyncio.create_task(self._run_loop())
 
     async def async_stop(self):
         """Stop engine loop."""
-
         self.running = False
 
     async def _run_loop(self):
         """Main continuous evaluation loop."""
-
         while self.running:
-
             try:
                 self._tick()
-
             except Exception as err:
                 print(f"[MED ENGINE ERROR] {err}")
 
@@ -113,13 +102,11 @@ class MedEngine:
         # ---------------------------------------------------------
         # TIME SOURCE
         # ---------------------------------------------------------
-
         now = datetime.now(timezone.utc)
 
         # ---------------------------------------------------------
         # LOAD DATA
         # ---------------------------------------------------------
-
         meds = self.storage.get_all()
 
         if not meds:
@@ -129,16 +116,13 @@ class MedEngine:
         # ---------------------------------------------------------
         # PROCESS EACH MEDICATION
         # ---------------------------------------------------------
-
         for med_id, med in meds.items():
 
-            # Evaluate full medication state
             state = self._evaluate(med, now)
 
             # -----------------------------------------------------
-            # PERSIST ENGINE OUTPUT (UI + ENTITY LAYER)
+            # PERSIST ENGINE OUTPUT
             # -----------------------------------------------------
-
             med["status"] = state["status"]
             med["next_due"] = state["next_due"]
             med["refill_required"] = state["refill_required"]
@@ -148,15 +132,13 @@ class MedEngine:
             print(f"[MED ENGINE] {med_id} -> {state['status']}")
 
             # -----------------------------------------------------
-            # EVENT EMISSION (FUTURE AUTOMATIONS)
+            # EVENT EMISSION
             # -----------------------------------------------------
-
             self._emit_event(med_id, state)
 
             # -----------------------------------------------------
             # NOTIFICATION SYSTEM
             # -----------------------------------------------------
-
             if state["should_notify"]:
                 self._notify(med_id, med, state["status"])
                 self.storage.mark_notified(med_id, now.timestamp())
@@ -173,7 +155,6 @@ class MedEngine:
         # ---------------------------------------------------------
         # INPUT DATA
         # ---------------------------------------------------------
-
         last_taken = med.get("last_taken")
         interval_hours = med.get("interval_hours")
         snooze_until = med.get("snooze_until")
@@ -184,7 +165,6 @@ class MedEngine:
         # ---------------------------------------------------------
         # OUTPUT STRUCTURE
         # ---------------------------------------------------------
-
         result = {
             "status": "unknown",
             "next_due": None,
@@ -195,7 +175,6 @@ class MedEngine:
         # ---------------------------------------------------------
         # VALIDATION
         # ---------------------------------------------------------
-
         if not last_taken or not interval_hours:
             result["status"] = "not_initialized"
             return result
@@ -203,14 +182,12 @@ class MedEngine:
         # ---------------------------------------------------------
         # INVENTORY CHECK
         # ---------------------------------------------------------
-
         if current_count <= low_stock_threshold:
             result["refill_required"] = True
 
         # ---------------------------------------------------------
         # SNOOZE SYSTEM
         # ---------------------------------------------------------
-
         if snooze_until and now.timestamp() < snooze_until:
             result["status"] = "snoozed"
             result["next_due"] = last_taken + (interval_hours * 3600)
@@ -219,7 +196,6 @@ class MedEngine:
         # ---------------------------------------------------------
         # SCHEDULING SYSTEM
         # ---------------------------------------------------------
-
         interval_seconds = interval_hours * 3600
         next_due = last_taken + interval_seconds
 
@@ -230,30 +206,24 @@ class MedEngine:
         # ---------------------------------------------------------
         # STATE CLASSIFICATION
         # ---------------------------------------------------------
-
         if time_to_due < -3600:
             result["status"] = "overdue"
-
         elif time_to_due <= 0:
             result["status"] = "due"
-
         elif time_to_due <= 3600:
             result["status"] = "due_soon"
-
         else:
             result["status"] = "not_due"
 
         # ---------------------------------------------------------
         # NOTIFICATION GATING
         # ---------------------------------------------------------
-
         if result["status"] in ["due", "due_soon", "overdue"]:
 
             if not last_notified:
                 result["should_notify"] = True
-            else:
-                if now.timestamp() - last_notified > 900:
-                    result["should_notify"] = True
+            elif now.timestamp() - last_notified > 900:
+                result["should_notify"] = True
 
         return result
 
@@ -264,7 +234,7 @@ class MedEngine:
     def _notify(self, med_id, med, status):
         """Send Home Assistant notification."""
 
-        name = med.get("common_name", med_id)
+        name = med.get("common_name") or med.get("name") or med_id
 
         message = f"Medication '{name}' is {status}"
 
