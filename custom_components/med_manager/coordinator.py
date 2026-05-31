@@ -140,6 +140,7 @@ class MedEngine:
             # Persist engine results into storage (UI + entity layer)
             med["status"] = state["status"]
             med["next_due"] = state["next_due"]
+            med["refill_flag"] = state["refill_flag"]
 
             self.storage.update_med(med_id, med)
 
