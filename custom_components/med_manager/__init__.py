@@ -1,21 +1,44 @@
-"""HA Meds Manager Integration Entry Point.
+"""HA Meds Manager - Final Integration Bootstrap
 
 This file is the MAIN ENTRY POINT for Home Assistant.
 
 It is responsible for:
+
+===========================================================
+CORE SYSTEM BOOTSTRAP
+===========================================================
 - initializing storage layer
 - initializing engine layer
-- registering Home Assistant services
-- preparing future entity + automation hooks
+- wiring runtime dependencies
+
+===========================================================
+SERVICE LAYER (USER ACTIONS)
+===========================================================
+- mark medication as taken
+- snooze medication alerts
+- future extensibility for skip / refill / reset
+
+===========================================================
+EVENT SYSTEM BINDING
+===========================================================
+- listens to engine events
+- prepares automation hooks
+- bridges engine → Home Assistant event bus
+
+===========================================================
+FUTURE UI / ENTITY SYSTEM SUPPORT
+===========================================================
+- prepares structure for sensor.med_*
+- ensures compatibility with Lovelace dashboards
 """
 
-from datetime import datetime, timezone  # Used for timestamps
+from datetime import datetime, timezone  # timestamp handling
 
-from homeassistant.core import HomeAssistant, ServiceCall  # Core HA types
+from homeassistant.core import HomeAssistant, ServiceCall  # Home Assistant core types
 
-from .storage import MedStorage  # Medication storage system
+from .storage import MedStorage  # central data store
 
-from .coordinator import MedEngine  # Core scheduling engine
+from .coordinator import MedEngine  # core scheduling engine
 
 
 # ---------------------------------------------------------
@@ -30,6 +53,12 @@ DOMAIN = "med_manager"
 async def async_setup(hass: HomeAssistant, config: dict):
     """
     Called automatically when Home Assistant loads the integration.
+
+    This function wires together:
+    - storage
+    - engine
+    - services
+    - event system
     """
 
     # ---------------------------------------------------------
@@ -52,7 +81,7 @@ async def async_setup(hass: HomeAssistant, config: dict):
     engine = MedEngine(hass)
     hass.data[DOMAIN]["engine"] = engine
 
-    # Start background engine loop
+    # Start background evaluation loop
     await engine.async_start()
 
     # ---------------------------------------------------------
@@ -62,6 +91,11 @@ async def async_setup(hass: HomeAssistant, config: dict):
     async def handle_take(call: ServiceCall):
         """
         User marks medication as taken.
+
+        This updates:
+        - last_taken timestamp
+        - resets snooze
+        - triggers engine recalculation next cycle
         """
 
         med_id = call.data.get("med_id")
@@ -70,15 +104,17 @@ async def async_setup(hass: HomeAssistant, config: dict):
 
         storage.mark_taken(med_id, now)
 
-        print(f"[MED SERVICE] Taken -> {med_id}")
+        print(f"[MED SERVICE] TAKE -> {med_id}")
 
     # ---------------------------------------------------------
-    # SERVICE: SNOOZE MEDICATION ALERTS
+    # SERVICE: SNOOZE MEDICATION
     # ---------------------------------------------------------
 
     async def handle_snooze(call: ServiceCall):
         """
-        User snoozes medication notifications.
+        User snoozes medication alerts.
+
+        Prevents notifications until future timestamp.
         """
 
         med_id = call.data.get("med_id")
@@ -90,7 +126,20 @@ async def async_setup(hass: HomeAssistant, config: dict):
 
         storage.snooze(med_id, snooze_until)
 
-        print(f"[MED SERVICE] Snoozed -> {med_id} for {minutes} min")
+        print(f"[MED SERVICE] SNOOZE -> {med_id} ({minutes} min)")
+
+    # ---------------------------------------------------------
+    # FUTURE SERVICE HOOKS (PLACEHOLDER EXTENSIONS)
+    # ---------------------------------------------------------
+
+    async def handle_refill(call: ServiceCall):
+        """
+        Placeholder for future refill tracking system.
+        """
+
+        med_id = call.data.get("med_id")
+
+        print(f"[MED SERVICE] REFILL REQUEST -> {med_id}")
 
     # ---------------------------------------------------------
     # REGISTER SERVICES WITH HOME ASSISTANT
@@ -108,16 +157,48 @@ async def async_setup(hass: HomeAssistant, config: dict):
         handle_snooze
     )
 
+    hass.services.async_register(
+        DOMAIN,
+        "refill",
+        handle_refill
+    )
+
     # ---------------------------------------------------------
-    # FUTURE HOOKS (PLACEHOLDER FOR ENTITIES + EVENTS)
+    # EVENT SYSTEM REGISTRATION
     # ---------------------------------------------------------
 
     hass.data[DOMAIN]["events"] = {
         "med_due": [],
+        "med_due_soon": [],
+        "med_overdue": [],
         "med_taken": [],
-        "med_overdue": []
+        "med_snoozed": []
     }
 
-    print("[MED MANAGER] Integration fully initialized")
+    # ---------------------------------------------------------
+    # ENGINE EVENT BRIDGE (OPTIONAL EXTENSION HOOK)
+    # ---------------------------------------------------------
+
+    def _event_listener(event):
+        """
+        Future automation bridge.
+
+        This will later connect:
+        engine events → HA automations → UI updates
+        """
+
+        print(f"[MED EVENT] {event.event_type} -> {event.data}")
+
+    # Listen to all med_manager events
+    hass.bus.listen("med_manager_due", _event_listener)
+    hass.bus.listen("med_manager_due_soon", _event_listener)
+    hass.bus.listen("med_manager_overdue", _event_listener)
+    hass.bus.listen("med_manager_snoozed", _event_listener)
+
+    # ---------------------------------------------------------
+    # FINAL STARTUP CONFIRMATION
+    # ---------------------------------------------------------
+
+    print("[MED MANAGER] Integration fully initialized and running")
 
     return True
