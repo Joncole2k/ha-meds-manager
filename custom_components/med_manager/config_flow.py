@@ -45,6 +45,10 @@ DOMAIN = "med_manager"
 class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """
     Handles UI setup and medication creation wizard.
+
+    This class defines the full onboarding experience for:
+    - First-time integration setup
+    - Adding medications via UI wizard
     """
 
     # -----------------------------------------------------
@@ -56,7 +60,7 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # INITIALIZATION
     # -----------------------------------------------------
     def __init__(self):
-        # Storage reference (initialized when needed)
+        # Storage reference (lazy-initialized)
         self._storage = None
 
     # =====================================================
@@ -64,15 +68,15 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # =====================================================
     async def async_step_user(self, user_input=None):
         """
-        First screen shown in HA UI.
+        First screen shown in Home Assistant UI.
 
-        Lets user choose:
+        This acts as the entry menu:
         - Add Medication
-        - Finish setup
+        - Finish Setup
         """
 
         # -------------------------------------------------
-        # INIT STORAGE (LAZY LOAD)
+        # INIT STORAGE (LAZY LOAD SAFETY)
         # -------------------------------------------------
         if self._storage is None:
             self._storage = MedStorage(self.hass)
@@ -82,11 +86,13 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # -------------------------------------------------
         if user_input is not None:
 
+            action = user_input.get("action")
+
             # USER SELECTED: ADD MEDICATION
-            if user_input["action"] == "add_medication":
+            if action == "add_medication":
                 return await self.async_step_add_medication()
 
-            # USER SELECTED: FINISH
+            # USER SELECTED: FINISH SETUP
             return self.async_create_entry(
                 title="HA Meds Manager",
                 data={}
@@ -96,7 +102,10 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # UI FORM DEFINITION (MAIN MENU)
         # -------------------------------------------------
         schema = vol.Schema({
-            vol.Required("action", default="add_medication"): vol.In({
+            vol.Required(
+                "action",
+                default="add_medication"
+            ): vol.In({
                 "add_medication": "Add Medication",
                 "finish": "Finish Setup"
             })
@@ -115,12 +124,12 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # =====================================================
     async def async_step_add_medication(self, user_input=None):
         """
-        Medication creation form.
+        Medication creation wizard.
 
-        This creates:
-        - storage entry
-        - engine-visible medication
-        - entity-ready dataset
+        This step:
+        - collects medication info from UI
+        - stores it in MedStorage
+        - prepares engine + entity consumption
         """
 
         # -------------------------------------------------
@@ -134,44 +143,49 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             med_id = user_input["med_id"]
 
             # -------------------------------------------------
+            # STORAGE INSTANCE (SAFE REFERENCE)
+            # -------------------------------------------------
+            storage = self._storage or MedStorage(self.hass)
+
+            # -------------------------------------------------
             # BUILD MEDICATION DATA STRUCTURE
             # -------------------------------------------------
             data = {
-                # -------------------------------
+                # ---------------------------------------------
                 # IDENTITY LAYER
-                # -------------------------------
+                # ---------------------------------------------
                 "common_name": user_input["common_name"],
                 "generic_name": user_input.get("generic_name"),
                 "brand_name": user_input.get("brand_name"),
                 "person": user_input["person"],
 
-                # -------------------------------
+                # ---------------------------------------------
                 # SCHEDULING LAYER
-                # -------------------------------
+                # ---------------------------------------------
                 "interval_hours": user_input["interval_hours"],
                 "last_taken": None,
                 "next_due": None,
 
-                # -------------------------------
+                # ---------------------------------------------
                 # ENGINE STATE
-                # -------------------------------
+                # ---------------------------------------------
                 "status": "not_initialized",
                 "should_notify": False,
 
-                # -------------------------------
+                # ---------------------------------------------
                 # USER STATE
-                # -------------------------------
+                # ---------------------------------------------
                 "snooze_until": None,
 
-                # -------------------------------
+                # ---------------------------------------------
                 # NOTIFICATION STATE
-                # -------------------------------
+                # ---------------------------------------------
                 "last_notified": None,
                 "notification_count": 0,
 
-                # -------------------------------
+                # ---------------------------------------------
                 # INVENTORY STATE
-                # -------------------------------
+                # ---------------------------------------------
                 "current_count": user_input.get("current_count", 0),
                 "low_stock_threshold": user_input.get("low_stock_threshold", 5),
                 "refill_required": False,
@@ -180,11 +194,10 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # -------------------------------------------------
             # STORE MEDICATION
             # -------------------------------------------------
-            storage = MedStorage(self.hass)
             storage.create_medication(med_id, data)
 
             # -------------------------------------------------
-            # FINISH FLOW
+            # FINISH FLOW (CREATE CONFIG ENTRY)
             # -------------------------------------------------
             return self.async_create_entry(
                 title=f"Medication Added: {med_id}",
@@ -195,17 +208,17 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # UI FORM (MEDICATION INPUT)
         # -------------------------------------------------
         schema = vol.Schema({
-            # -------------------------------
+            # ---------------------------------------------
             # REQUIRED FIELDS
-            # -------------------------------
+            # ---------------------------------------------
             vol.Required("med_id"): str,
             vol.Required("common_name"): str,
             vol.Required("person"): str,
             vol.Required("interval_hours"): int,
 
-            # -------------------------------
+            # ---------------------------------------------
             # OPTIONAL FIELDS
-            # -------------------------------
+            # ---------------------------------------------
             vol.Optional("generic_name"): str,
             vol.Optional("brand_name"): str,
 
