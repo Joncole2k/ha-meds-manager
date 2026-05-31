@@ -43,6 +43,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .storage import MedStorage
 
@@ -52,6 +53,10 @@ from .storage import MedStorage
 # ---------------------------------------------------------
 DOMAIN = "med_manager"
 
+# =========================================================
+# ENTITY UPDATE SIGNAL (FINAL STANDARD)
+# =========================================================
+SIGNAL_UPDATE = "med_manager_update"  # ✅ ADDED
 
 class MedEngine:
     """
@@ -143,6 +148,11 @@ class MedEngine:
                 self._notify(med_id, med, state["status"])
                 self.storage.mark_notified(med_id, now.timestamp())
 
+        # =====================================================
+        # ENTITY UPDATE BROADCAST (FINAL ADDITION)
+        # =====================================================
+        async_dispatcher_send(self.hass, SIGNAL_UPDATE)
+    
     # ---------------------------------------------------------
     # CORE EVALUATION ENGINE
     # ---------------------------------------------------------
