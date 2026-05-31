@@ -3,8 +3,10 @@
   "name": "HA Meds Manager",
   "version": "0.1.0",
   "documentation": "https://github.com/Joncole2k/ha-meds-manager",
+  "issue_tracker": "https://github.com/Joncole2k/ha-meds-manager/issues",
   "dependencies": [],
   "codeowners": [],
   "requirements": [],
-  "iot_class": "local_polling"
+  "iot_class": "local_polling",
+  "integration_type": "service"
 }
