@@ -1,47 +1,42 @@
 """
-HA Meds Manager - Entity Layer (FINAL)
-
-This file exposes medications as Home Assistant sensor entities.
+HA Meds Manager - Entity Layer (FINAL MODERN VERSION)
 
 ===========================================================
 PURPOSE
 ===========================================================
-Transforms stored medication data into:
-- sensor.med_* entities
-- UI-visible attributes
-- real-time state updates
+This file exposes medications as Home Assistant entities.
+
+Each medication becomes:
+- sensor.med_<id>
+
+Entities reflect:
+- status (due / due_soon / overdue / not_due / snoozed)
+- full metadata via attributes
 
 ===========================================================
-ARCHITECTURE MODEL
+MODERN HA ARCHITECTURE (2026 READY)
 ===========================================================
-Storage (source of truth)
-        ↓
-Engine (updates state)
-        ↓
-Entity layer (displays state in Home Assistant UI)
-
-===========================================================
-EVENT MODEL
-===========================================================
-Entities update via:
-- HA polling update() fallback
-- Event-driven refresh from engine signals
+- async_setup_entry (NOT legacy platform setup)
+- dispatcher-based updates (real-time UI sync)
+- storage-driven entity refresh
+- safe update model (no stale references)
 
 ===========================================================
 UI COMPATIBILITY
 ===========================================================
-Designed for:
-- Lovelace dashboards
+Works with:
+- Lovelace default cards
 - Mushroom cards
-- custom UI cards
+- Custom mod-card dashboards
 """
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .storage import MedStorage
-
-import asyncio
 
 
 # ---------------------------------------------------------
@@ -49,29 +44,43 @@ import asyncio
 # ---------------------------------------------------------
 DOMAIN = "med_manager"
 
+# Signal used to notify all entities to refresh
+SIGNAL_UPDATE = "med_manager_update"
+
 
 # ---------------------------------------------------------
-# ENTITY SETUP
+# SETUP ENTRY (MODERN HA WAY)
 # ---------------------------------------------------------
-async def async_setup_platform(
+async def async_setup_entry(
     hass: HomeAssistant,
-    config,
-    async_add_entities,
-    discovery_info=None
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback
 ):
     """
-    Create sensor entities for all medications in storage.
+    Creates medication entities dynamically from storage.
     """
 
     storage = MedStorage(hass)
+
     meds = storage.get_all()
 
     entities = []
 
     for med_id, med in meds.items():
-        entities.append(MedSensor(hass, med_id))
+        entities.append(MedSensor(hass, storage, med_id))
 
-    async_add_entities(entities, True)
+    async_add_entities(entities)
+
+    # ---------------------------------------------------------
+    # GLOBAL UPDATE SIGNAL
+    # ---------------------------------------------------------
+    def _handle_update():
+        """Force all entities to refresh from storage."""
+
+        for entity in entities:
+            entity.async_schedule_update_ha_state(True)
+
+    async_dispatcher_connect(hass, SIGNAL_UPDATE, _handle_update)
 
 
 # ---------------------------------------------------------
@@ -79,96 +88,76 @@ async def async_setup_platform(
 # ---------------------------------------------------------
 class MedSensor(SensorEntity):
     """
-    Represents a single medication as a Home Assistant sensor.
+    Single medication entity.
     """
 
-    def __init__(self, hass, med_id):
+    def __init__(self, hass, storage, med_id):
         self.hass = hass
+        self.storage = storage
         self._med_id = med_id
-        self._storage = MedStorage(hass)
-        self._data = None
-
-        # Subscribe to HA event bus for reactive updates
-        self.hass.bus.listen("med_manager_due", self._handle_event)
-        self.hass.bus.listen("med_manager_due_soon", self._handle_event)
-        self.hass.bus.listen("med_manager_overdue", self._handle_event)
-        self.hass.bus.listen("med_manager_snoozed", self._handle_event)
+        self._data = {}
 
     # ---------------------------------------------------------
     # IDENTITY
     # ---------------------------------------------------------
     @property
     def name(self):
-        med = self._get_data()
-        return f"med_{med.get('common_name', self._med_id)}"
+        return f"med_{self._med_id}"
 
     @property
     def unique_id(self):
-        return self._med_id
+        return f"med_manager_{self._med_id}"
 
     # ---------------------------------------------------------
     # STATE
     # ---------------------------------------------------------
     @property
     def state(self):
-        med = self._get_data()
-        return med.get("status", "unknown")
+        self._refresh()
+        return self._data.get("status", "unknown")
 
     # ---------------------------------------------------------
-    # ATTRIBUTES (FULL UI EXPOSURE)
+    # ATTRIBUTES (FULL DASHBOARD SUPPORT)
     # ---------------------------------------------------------
     @property
     def extra_state_attributes(self):
-        med = self._get_data()
+        self._refresh()
 
         return {
-            # Identity
-            "common_name": med.get("common_name"),
-            "generic_name": med.get("generic_name"),
-            "brand_name": med.get("brand_name"),
-            "person": med.get("person"),
+            "name": self._data.get("name"),
+            "generic_name": self._data.get("generic_name"),
+            "brand": self._data.get("brand"),
+            "person": self._data.get("person"),
 
-            # Scheduling
-            "interval_hours": med.get("interval_hours"),
-            "last_taken": med.get("last_taken"),
-            "next_due": med.get("next_due"),
+            "interval_hours": self._data.get("interval_hours"),
+            "last_taken": self._data.get("last_taken"),
+            "next_due": self._data.get("next_due"),
 
-            # User state
-            "snooze_until": med.get("snooze_until"),
+            "snooze_until": self._data.get("snooze_until"),
 
-            # Notifications
-            "last_notified": med.get("last_notified"),
+            "status": self._data.get("status"),
 
-            # Inventory
-            "current_count": med.get("current_count"),
-            "low_stock_threshold": med.get("low_stock_threshold"),
-            "refill_required": med.get("refill_required"),
+            "current_count": self._data.get("current_count"),
+            "low_stock_threshold": self._data.get("low_stock_threshold"),
 
-            # UI metadata
-            "entity_id": self._med_id,
+            "refill_required": self._data.get("refill_required"),
         }
 
     # ---------------------------------------------------------
-    # DATA ACCESS LAYER
+    # UPDATE SYSTEM
     # ---------------------------------------------------------
-    def _get_data(self):
-        self._data = self._storage.get_med(self._med_id) or {}
-        return self._data
+    def _refresh(self):
+        """Pull latest data from storage (always fresh)."""
+
+        med = self.storage.get_med(self._med_id)
+
+        if med:
+            self._data = med
 
     # ---------------------------------------------------------
-    # REFRESH (HA POLLING FALLBACK)
+    # HA UPDATE TRIGGER
     # ---------------------------------------------------------
-    def update(self):
-        self._get_data()
+    async def async_update(self):
+        """Called by Home Assistant refresh cycle."""
 
-    # ---------------------------------------------------------
-    # EVENT-DRIVEN REFRESH
-    # ---------------------------------------------------------
-    def _handle_event(self, event):
-        """
-        Called when engine emits state changes.
-        Forces UI refresh.
-        """
-
-        if hasattr(self, "async_write_ha_state"):
-            self.async_write_ha_state()
+        self._refresh()
