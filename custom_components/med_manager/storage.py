@@ -36,10 +36,10 @@ class MedStorage:
         # Store Home Assistant instance
         self.hass = hass
 
-        # Initialize integration namespace
+        # Initialize integration namespace (safe re-entry)
         self.hass.data.setdefault(DOMAIN, {})
 
-        # Initialize medication store
+        # Initialize medication store (single source of truth)
         self.hass.data[DOMAIN].setdefault("medications", {})
 
         # Ensure demo data exists for immediate testing
