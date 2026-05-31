@@ -1,42 +1,78 @@
 """HA Meds Manager integration entry point.
 
-This file is loaded by Home Assistant when the integration starts.
-It is responsible for initializing and starting the medication engine.
+This file initializes:
+- storage
+- engine
+- Home Assistant services
 """
 
-from homeassistant.core import HomeAssistant  # Home Assistant core type hints
+from datetime import datetime, timezone  # Used for timestamping actions
 
-from .coordinator import MedEngine  # Import the medication engine (core scheduler loop)
+from homeassistant.core import HomeAssistant  # Home Assistant core
+
+from .coordinator import MedEngine  # Medication engine (scheduler loop)
+from .storage import MedStorage  # Storage layer (state persistence)
 
 
-# DOMAIN is the unique identifier for this integration inside Home Assistant
-# It is used as the key in hass.data storage
+# DOMAIN is the unique identifier for this integration
 DOMAIN = "med_manager"
 
 
 async def async_setup(hass: HomeAssistant, config: dict):
     """
-    Called automatically by Home Assistant when the integration is loaded.
-
-    This function is the entry point for setting up the integration.
+    Called automatically when Home Assistant loads the integration.
     """
 
-    # Ensure a storage container exists for this integration inside Home Assistant
-    # hass.data is shared runtime memory used by integrations
+    # Ensure base storage exists for this integration
     hass.data.setdefault(DOMAIN, {})
 
-    # Create an instance of the medication engine
-    # This engine will handle all scheduling logic and state evaluation
+    # ---------------------------------------------------------
+    # Initialize storage layer
+    # ---------------------------------------------------------
+    storage = MedStorage(hass)
+
+    # Store storage reference globally for later use
+    hass.data[DOMAIN]["storage"] = storage
+
+    # ---------------------------------------------------------
+    # Initialize engine layer
+    # ---------------------------------------------------------
     engine = MedEngine(hass)
 
-    # Store the engine inside Home Assistant's runtime data registry
-    # This allows other parts of the integration to access it later
+    # Store engine reference globally for later use
     hass.data[DOMAIN]["engine"] = engine
 
-    # Start the background engine loop
-    # This begins continuous medication scheduling evaluation
+    # Start background scheduling engine
     await engine.async_start()
 
-    # Return True signals to Home Assistant:
-    # "Integration loaded and started successfully"
+    # ---------------------------------------------------------
+    # REGISTER SERVICE: med_manager.take
+    # ---------------------------------------------------------
+    async def handle_take(call):
+        """
+        Service handler for marking medication as taken.
+
+        Called from Home Assistant UI or automations.
+        """
+
+        # Extract medication ID from service call data
+        med_id = call.data.get("med_id")
+
+        # Get current timestamp in UTC
+        now = datetime.now(timezone.utc).timestamp()
+
+        # Update medication state in storage
+        storage.mark_taken(med_id, now)
+
+        # Debug log (temporary)
+        print(f"[MED SERVICE] Marked taken -> {med_id} at {now}")
+
+    # Register the service with Home Assistant
+    hass.services.async_register(
+        DOMAIN,
+        "take",
+        handle_take
+    )
+
+    # Integration successfully loaded
     return True
