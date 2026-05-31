@@ -2,8 +2,9 @@
   "domain": "med_manager",
   "name": "HA Meds Manager",
   "version": "0.1.0",
-  "documentation": "",
+  "documentation": "https://github.com/Joncole2k/ha-meds-manager",
   "dependencies": [],
   "codeowners": [],
-  "requirements": []
+  "requirements": [],
+  "iot_class": "local_polling"
 }
