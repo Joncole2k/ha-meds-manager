@@ -1,24 +1,22 @@
-"""HA Meds Manager Storage Layer.
+"""HA Meds Manager - Storage Layer (FINAL PRODUCT MODEL)
 
-This file defines the COMPLETE medication data model and storage system.
+This file defines the COMPLETE medication data structure used across:
+- Engine (scheduling + evaluation)
+- Services (take / snooze)
+- Notifications
+- Future entities (sensor.med_*)
+- Future UI dashboards (Lovelace cards)
 
-It is responsible for:
-- storing medication definitions
-- storing scheduling state
-- storing snooze state
-- storing notification state
-- supporting future entity + UI mapping
-
-This is the SINGLE SOURCE OF TRUTH for all medication data.
+This is the SINGLE SOURCE OF TRUTH for all medication state.
 """
 
-from datetime import datetime, timezone  # Used for timestamps and scheduling
+from datetime import datetime, timezone  # Timestamp handling
 
-from homeassistant.core import HomeAssistant  # Home Assistant system access
+from homeassistant.core import HomeAssistant  # Home Assistant access
 
 
 # ---------------------------------------------------------
-# DOMAIN KEY
+# DOMAIN IDENTIFIER
 # ---------------------------------------------------------
 DOMAIN = "med_manager"
 
@@ -27,24 +25,23 @@ class MedStorage:
     """
     Central medication storage system.
 
-    This class is responsible for ALL state persistence including:
-    - medication definitions
-    - scheduling state
-    - user actions (taken, snoozed, skipped)
-    - notification tracking
+    This class handles:
+    - persistence (runtime via hass.data)
+    - full medication schema storage
+    - state tracking for engine + UI + entities
     """
 
     def __init__(self, hass: HomeAssistant):
-        # Store Home Assistant reference
+        # Store Home Assistant instance
         self.hass = hass
 
-        # Ensure integration namespace exists
+        # Initialize integration namespace
         self.hass.data.setdefault(DOMAIN, {})
 
-        # Ensure medication container exists
+        # Initialize medication store
         self.hass.data[DOMAIN].setdefault("medications", {})
 
-        # Initialize demo data if empty (safe bootstrap for testing)
+        # Ensure demo data exists for immediate testing
         if not self.hass.data[DOMAIN]["medications"]:
             self._seed_demo_data()
 
@@ -57,15 +54,15 @@ class MedStorage:
         return self.hass.data[DOMAIN]["medications"]
 
     def get_med(self, med_id):
-        """Return single medication by ID."""
+        """Get single medication record."""
         return self.hass.data[DOMAIN]["medications"].get(med_id)
 
-    def update_med(self, med_id, med_data):
-        """Update or create medication record."""
-        self.hass.data[DOMAIN]["medications"][med_id] = med_data
+    def update_med(self, med_id, data):
+        """Update full medication record."""
+        self.hass.data[DOMAIN]["medications"][med_id] = data
 
     # ---------------------------------------------------------
-    # ACTION METHODS (USER INTERACTIONS)
+    # USER ACTION METHODS (SERVICES)
     # ---------------------------------------------------------
 
     def mark_taken(self, med_id, timestamp):
@@ -74,26 +71,25 @@ class MedStorage:
 
         Updates:
         - last_taken
-        - clears snooze (if active)
+        - clears snooze
+        - resets notification state if needed
         """
 
         med = self.get_med(med_id)
-
         if not med:
             return
 
         med["last_taken"] = timestamp
-        med["snooze_until"] = None  # clear snooze when taken
+        med["snooze_until"] = None
 
         self.update_med(med_id, med)
 
     def snooze(self, med_id, until_timestamp):
         """
-        User action: snooze medication alerts until time.
+        User action: snooze medication alerts.
         """
 
         med = self.get_med(med_id)
-
         if not med:
             return
 
@@ -103,71 +99,87 @@ class MedStorage:
 
     def mark_notified(self, med_id, timestamp):
         """
-        Track last notification time to prevent spam.
+        Engine action: tracks notifications to prevent spam.
         """
 
         med = self.get_med(med_id)
-
         if not med:
             return
 
         med["last_notified"] = timestamp
+        med["notification_count"] = med.get("notification_count", 0) + 1
 
         self.update_med(med_id, med)
 
     # ---------------------------------------------------------
-    # DEMO DATA (FULL STRUCTURE MODEL)
+    # DEMO DATA (FULL SYSTEM SCHEMA)
     # ---------------------------------------------------------
 
     def _seed_demo_data(self):
         """
-        Create full example medication structure.
+        Creates full schema example medication.
 
-        This defines the STANDARD DATA MODEL used everywhere.
+        This defines ALL fields required for:
+        - engine scheduling
+        - notifications
+        - snooze
+        - UI
+        - future entity mapping
         """
 
         now = datetime.now(timezone.utc).timestamp()
 
         self.hass.data[DOMAIN]["medications"] = {
-            "med_jonathan_001": {
+            "med_jonathan_tylenol": {
                 # -------------------------------------------------
-                # IDENTITY
+                # IDENTITY LAYER
                 # -------------------------------------------------
                 "name": "Tylenol",
+                "generic_name": "acetaminophen",
+                "brand": "Equate",
                 "person": "jonathan",
 
                 # -------------------------------------------------
                 # SCHEDULING MODEL
                 # -------------------------------------------------
                 "interval_hours": 6,
-                "last_taken": now - 7200,  # 2 hours ago
-                "next_due": None,  # engine will compute
+                "last_taken": now - 7200,
+                "next_due": None,
 
                 # -------------------------------------------------
-                # STATE TRACKING
+                # ENGINE STATE
                 # -------------------------------------------------
                 "status": "unknown",
 
                 # -------------------------------------------------
-                # USER CONTROL STATES
+                # SNOOZE SYSTEM
                 # -------------------------------------------------
                 "snooze_until": None,
 
                 # -------------------------------------------------
-                # NOTIFICATION TRACKING
+                # NOTIFICATION SYSTEM
                 # -------------------------------------------------
                 "last_notified": None,
                 "notification_count": 0,
 
                 # -------------------------------------------------
-                # INVENTORY (future-ready)
+                # INVENTORY MANAGEMENT
                 # -------------------------------------------------
                 "current_count": 30,
+                "original_count": 30,
                 "low_stock_threshold": 5,
+                "refill_required": False,
+                "refill_type": "non_refillable",
 
                 # -------------------------------------------------
-                # FUTURE UI / ENTITY MAPPING
+                # UI / ENTITY LAYER
                 # -------------------------------------------------
-                "entity_id": "sensor.med_jonathan_tylenol"
+                "entity_id": "sensor.med_jonathan_tylenol",
+                "ui_group": "jonathan_medications",
+
+                # -------------------------------------------------
+                # AUTOMATION HOOKS
+                # -------------------------------------------------
+                "event_enabled": True
             }
         }
