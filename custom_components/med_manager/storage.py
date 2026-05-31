@@ -1,113 +1,173 @@
 """HA Meds Manager Storage Layer.
 
-This file manages all medication data storage.
+This file defines the COMPLETE medication data model and storage system.
 
-Current design:
-- Uses hass.data for runtime persistence
-- Automatically seeds demo data if storage is empty (for testing)
-- Will later migrate to Home Assistant Store API for persistence
+It is responsible for:
+- storing medication definitions
+- storing scheduling state
+- storing snooze state
+- storing notification state
+- supporting future entity + UI mapping
+
+This is the SINGLE SOURCE OF TRUTH for all medication data.
 """
 
-from datetime import datetime, timezone  # Used for generating demo timestamps
+from datetime import datetime, timezone  # Used for timestamps and scheduling
 
-from homeassistant.core import HomeAssistant  # Home Assistant core access
+from homeassistant.core import HomeAssistant  # Home Assistant system access
 
 
-# DOMAIN key used inside hass.data
+# ---------------------------------------------------------
+# DOMAIN KEY
+# ---------------------------------------------------------
 DOMAIN = "med_manager"
 
 
 class MedStorage:
     """
-    Storage layer for medication data.
+    Central medication storage system.
 
-    Responsible for:
-    - storing medication records
-    - retrieving medication records
-    - updating medication records
-    - providing initial demo data for testing
+    This class is responsible for ALL state persistence including:
+    - medication definitions
+    - scheduling state
+    - user actions (taken, snoozed, skipped)
+    - notification tracking
     """
 
     def __init__(self, hass: HomeAssistant):
         # Store Home Assistant reference
         self.hass = hass
 
-        # Ensure integration storage exists in hass.data
+        # Ensure integration namespace exists
         self.hass.data.setdefault(DOMAIN, {})
 
         # Ensure medication container exists
         self.hass.data[DOMAIN].setdefault("medications", {})
 
-        # ---------------------------------------------------------
-        # AUTO-SEED DEMO DATA (ONLY IF EMPTY)
-        # ---------------------------------------------------------
+        # Initialize demo data if empty (safe bootstrap for testing)
         if not self.hass.data[DOMAIN]["medications"]:
             self._seed_demo_data()
 
+    # ---------------------------------------------------------
+    # CORE ACCESS METHODS
+    # ---------------------------------------------------------
+
     def get_all(self):
-        """
-        Return all medication records.
-        """
+        """Return all medication records."""
         return self.hass.data[DOMAIN]["medications"]
 
-    def set_all(self, data):
-        """
-        Replace all medication records.
-        """
-        self.hass.data[DOMAIN]["medications"] = data
-
     def get_med(self, med_id):
-        """
-        Retrieve a single medication by ID.
-        """
+        """Return single medication by ID."""
         return self.hass.data[DOMAIN]["medications"].get(med_id)
 
     def update_med(self, med_id, med_data):
-        """
-        Update or create medication entry.
-        """
+        """Update or create medication record."""
         self.hass.data[DOMAIN]["medications"][med_id] = med_data
+
+    # ---------------------------------------------------------
+    # ACTION METHODS (USER INTERACTIONS)
+    # ---------------------------------------------------------
 
     def mark_taken(self, med_id, timestamp):
         """
-        Mark a medication as taken.
+        User action: medication taken.
 
-        This updates:
-        - last_taken timestamp
+        Updates:
+        - last_taken
+        - clears snooze (if active)
         """
 
-        # Retrieve medication entry
         med = self.get_med(med_id)
 
-        # If medication does not exist, exit safely
         if not med:
-            print(f"[MED STORAGE] Medication not found: {med_id}")
             return
 
-        # Update last_taken time
         med["last_taken"] = timestamp
+        med["snooze_until"] = None  # clear snooze when taken
 
-        # Save updated record
         self.update_med(med_id, med)
+
+    def snooze(self, med_id, until_timestamp):
+        """
+        User action: snooze medication alerts until time.
+        """
+
+        med = self.get_med(med_id)
+
+        if not med:
+            return
+
+        med["snooze_until"] = until_timestamp
+
+        self.update_med(med_id, med)
+
+    def mark_notified(self, med_id, timestamp):
+        """
+        Track last notification time to prevent spam.
+        """
+
+        med = self.get_med(med_id)
+
+        if not med:
+            return
+
+        med["last_notified"] = timestamp
+
+        self.update_med(med_id, med)
+
+    # ---------------------------------------------------------
+    # DEMO DATA (FULL STRUCTURE MODEL)
+    # ---------------------------------------------------------
 
     def _seed_demo_data(self):
         """
-        Create initial demo medication data.
+        Create full example medication structure.
 
-        This allows the system to run immediately after install
-        without requiring user configuration.
+        This defines the STANDARD DATA MODEL used everywhere.
         """
 
-        # Current UTC time for baseline calculations
         now = datetime.now(timezone.utc).timestamp()
 
-        # Create sample medication entry
         self.hass.data[DOMAIN]["medications"] = {
-            "jonathan_001": {
-                "name": "Demo Medication",
-                "last_taken": now - 7200,  # taken 2 hours ago
-                "interval_hours": 6
+            "med_jonathan_001": {
+                # -------------------------------------------------
+                # IDENTITY
+                # -------------------------------------------------
+                "name": "Tylenol",
+                "person": "jonathan",
+
+                # -------------------------------------------------
+                # SCHEDULING MODEL
+                # -------------------------------------------------
+                "interval_hours": 6,
+                "last_taken": now - 7200,  # 2 hours ago
+                "next_due": None,  # engine will compute
+
+                # -------------------------------------------------
+                # STATE TRACKING
+                # -------------------------------------------------
+                "status": "unknown",
+
+                # -------------------------------------------------
+                # USER CONTROL STATES
+                # -------------------------------------------------
+                "snooze_until": None,
+
+                # -------------------------------------------------
+                # NOTIFICATION TRACKING
+                # -------------------------------------------------
+                "last_notified": None,
+                "notification_count": 0,
+
+                # -------------------------------------------------
+                # INVENTORY (future-ready)
+                # -------------------------------------------------
+                "current_count": 30,
+                "low_stock_threshold": 5,
+
+                # -------------------------------------------------
+                # FUTURE UI / ENTITY MAPPING
+                # -------------------------------------------------
+                "entity_id": "sensor.med_jonathan_tylenol"
             }
         }
-
-        print("[MED STORAGE] Demo medication data initialized.")
