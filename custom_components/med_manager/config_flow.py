@@ -26,6 +26,8 @@ UI → Config Flow → Storage → Engine → Entities
 # ---------------------------------------------------------
 import voluptuous as vol  # schema validation for UI forms
 
+import uuid  # used for auto-generating medication IDs
+
 from homeassistant import config_entries  # base config flow system
 
 # ---------------------------------------------------------
@@ -63,6 +65,9 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Storage reference (lazy-initialized)
         self._storage = None
 
+        # Wizard state (used to pass data between steps)
+        self._wizard = {}
+
     # =====================================================
     # STEP 1 - MAIN MENU
     # =====================================================
@@ -72,7 +77,7 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         This acts as the entry menu:
         - Add Medication
-        - Finish Setup
+        - Exit Setup
         """
 
         # -------------------------------------------------
@@ -86,28 +91,16 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # -------------------------------------------------
         if user_input is not None:
 
-            action = user_input.get("action")
-
-            # USER SELECTED: ADD MEDICATION
-            if action == "add_medication":
-                return await self.async_step_add_medication()
-
-            # USER SELECTED: FINISH SETUP
-            return self.async_create_entry(
-                title="HA Meds Manager",
-                data={}
-            )
+            # USER SELECTED: GO DIRECTLY TO MEDICATION FLOW
+            return await self.async_step_add_medication()
 
         # -------------------------------------------------
-        # UI FORM DEFINITION (MAIN MENU)
+        # UI FORM DEFINITION (ENTRY SCREEN)
         # -------------------------------------------------
         schema = vol.Schema({
-            vol.Required(
-                "action",
-                default="add_medication"
-            ): vol.In({
+            vol.Required("action", default="add_medication"): vol.In({
                 "add_medication": "Add Medication",
-                "finish": "Finish Setup"
+                "finish": "Exit Setup"
             })
         })
 
@@ -128,7 +121,8 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         This step:
         - collects medication info from UI
-        - stores it in MedStorage
+        - auto-generates medication ID
+        - stores in MedStorage
         - prepares engine + entity consumption
         """
 
@@ -138,14 +132,32 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
 
             # -------------------------------------------------
-            # MEDICATION ID (PRIMARY KEY)
-            # -------------------------------------------------
-            med_id = user_input["med_id"]
-
-            # -------------------------------------------------
             # STORAGE INSTANCE (SAFE REFERENCE)
             # -------------------------------------------------
             storage = self._storage or MedStorage(self.hass)
+
+            # -------------------------------------------------
+            # REQUIRED USER INPUTS
+            # -------------------------------------------------
+            common_name = user_input["common_name"]
+            person = user_input["person"]
+            interval_hours = user_input["interval_hours"]
+
+            # -------------------------------------------------
+            # AUTO-GENERATE MEDICATION ID
+            # -------------------------------------------------
+            safe_name = common_name.lower().replace(" ", "_")[:20]
+            short_id = uuid.uuid4().hex[:5]
+            med_id = f"med_{person}_{safe_name}_{short_id}"
+
+            # -------------------------------------------------
+            # STORE WIZARD CONTEXT
+            # -------------------------------------------------
+            self._wizard = {
+                "med_id": med_id,
+                "person": person,
+                "common_name": common_name
+            }
 
             # -------------------------------------------------
             # BUILD MEDICATION DATA STRUCTURE
@@ -154,15 +166,15 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # ---------------------------------------------
                 # IDENTITY LAYER
                 # ---------------------------------------------
-                "common_name": user_input["common_name"],
+                "common_name": common_name,
                 "generic_name": user_input.get("generic_name"),
                 "brand_name": user_input.get("brand_name"),
-                "person": user_input["person"],
+                "person": person,
 
                 # ---------------------------------------------
                 # SCHEDULING LAYER
                 # ---------------------------------------------
-                "interval_hours": user_input["interval_hours"],
+                "interval_hours": interval_hours,
                 "last_taken": None,
                 "next_due": None,
 
@@ -200,8 +212,8 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # FINISH FLOW (CREATE CONFIG ENTRY)
             # -------------------------------------------------
             return self.async_create_entry(
-                title=f"Medication Added: {med_id}",
-                data={}
+                title=f"{common_name} ({person})",
+                data={"med_id": med_id}
             )
 
         # -------------------------------------------------
@@ -211,7 +223,6 @@ class MedManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # ---------------------------------------------
             # REQUIRED FIELDS
             # ---------------------------------------------
-            vol.Required("med_id"): str,
             vol.Required("common_name"): str,
             vol.Required("person"): str,
             vol.Required("interval_hours"): int,
