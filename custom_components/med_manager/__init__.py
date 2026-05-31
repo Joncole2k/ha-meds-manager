@@ -135,10 +135,11 @@ async def async_setup_entry(hass: HomeAssistant, entry):
         hass.bus.fire(event_type, data)
 
     # Listen to engine events
-    hass.bus.listen("med_manager_due", _event_listener)
-    hass.bus.listen("med_manager_due_soon", _event_listener)
-    hass.bus.listen("med_manager_overdue", _event_listener)
-    hass.bus.listen("med_manager_snoozed", _event_listener)
+    hass.bus.async_listen("med_manager_*", _event_listener)
+    # hass.bus.listen("med_manager_due", _event_listener)
+    # hass.bus.listen("med_manager_due_soon", _event_listener)
+    # hass.bus.listen("med_manager_overdue", _event_listener)
+    # hass.bus.listen("med_manager_snoozed", _event_listener)
 
     # ---------------------------------------------------------
     # FINAL STARTUP CONFIRMATION
