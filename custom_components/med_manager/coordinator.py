@@ -1,90 +1,101 @@
 """Medication Engine (core scheduler loop).
 
-This file is the core brain of HA Meds Manager.
+This file is the complete working engine for HA Meds Manager.
 
 It is responsible for:
-- continuously evaluating medication schedules
-- reading medication data from storage
-- determining medication states (due / not_due / overdue)
+- loading medication data from storage
+- evaluating medication schedules
+- determining medication state (not_due / due_soon / due / overdue)
+- triggering notifications via Home Assistant services
 """
 
-import asyncio  # Used for running continuous background loop
+import asyncio  # Used for continuous background loop timing
 
-from datetime import datetime, timezone  # Used for time-based calculations
+from datetime import datetime, timezone  # Used for time calculations
 
-from homeassistant.core import HomeAssistant  # Home Assistant core reference
+from homeassistant.core import HomeAssistant  # Home Assistant core system access
 
-from .storage import MedStorage  # Import storage layer (single source of truth)
+from .storage import MedStorage  # Storage layer (single source of truth for meds)
 
 
 class MedEngine:
     """
     Core medication scheduling engine.
 
-    This engine continuously evaluates medication timing
-    and produces status updates.
+    This engine continuously runs in the background and:
+    - evaluates medication timing
+    - calculates next dose state
+    - triggers notifications when needed
     """
 
     def __init__(self, hass: HomeAssistant):
         # Store Home Assistant instance reference
         self.hass = hass
 
-        # Flag controlling whether engine loop is running
+        # Engine running flag (controls loop lifecycle)
         self.running = False
 
-        # Initialize storage layer
+        # Initialize storage layer (access to medication data)
         self.storage = MedStorage(hass)
 
     async def async_start(self):
         """
-        Starts the background engine loop.
+        Start the background engine loop.
         """
 
-        # Set running flag to true
+        # Set engine state to running
         self.running = True
 
-        # Start async background loop inside Home Assistant event loop
+        # Create async task inside Home Assistant event loop
         self.hass.loop.create_task(self._run_loop())
 
     async def async_stop(self):
         """
-        Stops the engine loop safely.
+        Stop the engine loop safely.
         """
 
-        # Set running flag to false to exit loop
+        # Set running flag to false (loop will exit naturally)
         self.running = False
 
     async def _run_loop(self):
         """
-        Main continuous execution loop.
+        Main continuous loop.
 
-        This runs indefinitely while the integration is active.
+        Runs indefinitely while integration is active.
         """
 
         while self.running:
 
             try:
-                # Run one evaluation cycle
+                # Execute one evaluation cycle
                 self._tick()
 
             except Exception as err:
-                # Catch and log any engine errors
+                # Catch unexpected errors so engine never crashes HA
                 print(f"[MED ENGINE ERROR] {err}")
 
-            # Wait before next evaluation cycle
+            # Delay between evaluation cycles
             await asyncio.sleep(30)
 
     def _tick(self):
         """
         Single evaluation cycle.
 
-        This processes all medications and computes their state.
+        This processes all medications and determines their state.
         """
 
-        # Get current UTC time for all calculations
+        # ---------------------------------------------------------
+        # TIME SOURCE
+        # ---------------------------------------------------------
+
+        # Current UTC timestamp used for all comparisons
         now = datetime.now(timezone.utc)
 
-        # Retrieve all medication data from storage
+        # ---------------------------------------------------------
+        # LOAD DATA
+        # ---------------------------------------------------------
+
+        # Retrieve all medications from storage layer
         meds = self.storage.get_all()
 
         # If no medications exist, exit safely
@@ -92,48 +103,79 @@ class MedEngine:
             print("[MED ENGINE] No medications found.")
             return
 
-        # Loop through each medication entry
+        # ---------------------------------------------------------
+        # PROCESS EACH MEDICATION
+        # ---------------------------------------------------------
+
         for med_id, med in meds.items():
 
-            # Calculate current status for this medication
+            # -----------------------------------------------------
+            # STATE CALCULATION
+            # -----------------------------------------------------
+
             status = self._calculate_status(med, now)
 
             # Debug output for development visibility
             print(f"[MED ENGINE] {med_id} -> {status}")
 
+            # -----------------------------------------------------
+            # NOTIFICATION LOGIC
+            # -----------------------------------------------------
+
+            # If medication requires attention, trigger alert
+            if status in ["due", "due_soon", "overdue"]:
+
+                self._send_notification(med_id, med, status)
+
     def _calculate_status(self, med, now):
         """
-        Determines medication state based on timing rules.
+        Determine medication state based on schedule rules.
         """
 
-        # Retrieve last taken timestamp (if exists)
+        # ---------------------------------------------------------
+        # INPUT DATA
+        # ---------------------------------------------------------
+
+        # Last time medication was taken (timestamp)
         last_taken = med.get("last_taken")
 
-        # Retrieve dosing interval in hours
+        # Interval between doses in hours
         interval_hours = med.get("interval_hours")
+
+        # ---------------------------------------------------------
+        # VALIDATION STATE
+        # ---------------------------------------------------------
 
         # If medication has never been taken
         if not last_taken:
             return "not_initialized"
 
-        # Convert interval to seconds for calculation
+        # If interval is missing or invalid
+        if not interval_hours:
+            return "invalid_interval"
+
+        # ---------------------------------------------------------
+        # TIME CALCULATION
+        # ---------------------------------------------------------
+
+        # Convert hours to seconds for calculation
         interval_seconds = interval_hours * 3600
 
-        # Compute next scheduled dose time
+        # Calculate next scheduled dose time
         next_due = last_taken + interval_seconds
 
-        # Compute time difference between now and next dose
+        # Calculate time difference from now
         time_to_due = next_due - now.timestamp()
 
         # ---------------------------------------------------------
         # STATE LOGIC
         # ---------------------------------------------------------
 
-        # If overdue by more than 1 hour
+        # If overdue beyond 1 hour
         if time_to_due < -3600:
             return "overdue"
 
-        # If currently due or slightly past due
+        # If currently due or slightly late
         if time_to_due <= 0:
             return "due"
 
@@ -141,5 +183,35 @@ class MedEngine:
         if time_to_due <= 3600:
             return "due_soon"
 
-        # Otherwise medication is not due yet
+        # Otherwise medication is safely scheduled
         return "not_due"
+
+    def _send_notification(self, med_id, med, status):
+        """
+        Send notification via Home Assistant.
+
+        Currently uses persistent notifications.
+        Future upgrade: mobile_app push notifications.
+        """
+
+        # Get human-readable medication name
+        name = med.get("name", med_id)
+
+        # Build notification message
+        message = f"Medication '{name}' is {status}"
+
+        # ---------------------------------------------------------
+        # HOME ASSISTANT NOTIFICATION CALL
+        # ---------------------------------------------------------
+
+        self.hass.services.call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Medication Reminder",
+                "message": message
+            }
+        )
+
+        # Debug log for development
+        print(f"[MED NOTIFY] {med_id} -> {status}")
