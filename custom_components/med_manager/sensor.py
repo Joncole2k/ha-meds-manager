@@ -27,8 +27,9 @@ They are routed through:
 """
 
 from homeassistant.components.sensor import SensorEntity  # HA sensor base class
-
 from homeassistant.core import HomeAssistant  # HA system reference
+from homeassistant.helpers.entity_platform import AddEntitiesCallback  # NEW (required)
+from homeassistant.config_entries import ConfigEntry  # NEW (required)
 
 from .storage import MedStorage  # shared data layer
 
@@ -42,24 +43,39 @@ DOMAIN = "med_manager"
 # ---------------------------------------------------------
 # ENTITY PLATFORM SETUP
 # ---------------------------------------------------------
-async def async_setup_platform(hass: HomeAssistant, config, async_add_entities, discovery_info=None):
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback
+):
     """
     Creates sensor entities for all medications.
 
     This runs once and builds entity list from storage.
     """
 
+    # ---------------------------------------------------------
+    # STORAGE INITIALIZATION
+    # ---------------------------------------------------------
     storage = MedStorage(hass)
 
+    # ---------------------------------------------------------
+    # LOAD ALL MEDICATIONS
+    # ---------------------------------------------------------
     meds = storage.get_all()
 
+    # ---------------------------------------------------------
+    # ENTITY LIST BUILD
+    # ---------------------------------------------------------
     entities = []
 
     for med_id, med in meds.items():
         entities.append(MedSensor(hass, med_id, med))
-
+        
+    # ---------------------------------------------------------
+    # REGISTER ENTITIES
+    # ---------------------------------------------------------
     async_add_entities(entities, True)
-
 
 # ---------------------------------------------------------
 # MEDICATION SENSOR ENTITY
@@ -82,6 +98,9 @@ class MedSensor(SensorEntity):
     """
 
     def __init__(self, hass, med_id, data):
+        # ---------------------------------------------------------
+        # CORE REFERENCES
+        # ---------------------------------------------------------
         self.hass = hass
         self._med_id = med_id
         self._data = data
@@ -96,8 +115,8 @@ class MedSensor(SensorEntity):
 
     @property
     def unique_id(self):
-        return self._med_id
-
+        return f"med_manager_{self._med_id}"
+        
     # ---------------------------------------------------------
     # STATE VALUE
     # ---------------------------------------------------------
@@ -116,9 +135,9 @@ class MedSensor(SensorEntity):
             # -------------------------------------------------
             # IDENTITY
             # -------------------------------------------------
-            "name": self._data.get("name"),
+            "common_name": self._data.get("common_name"),
             "generic_name": self._data.get("generic_name"),
-            "brand": self._data.get("brand"),
+            "brand_name": self._data.get("brand_name"),
             "person": self._data.get("person"),
 
             # -------------------------------------------------
@@ -160,6 +179,12 @@ class MedSensor(SensorEntity):
         Pull latest state from storage every refresh cycle.
         """
 
+        # ---------------------------------------------------------
+        # STORAGE ACCESS
+        # ---------------------------------------------------------
         storage = MedStorage(self.hass)
 
+        # ---------------------------------------------------------
+        # REFRESH LOCAL STATE
+        # ---------------------------------------------------------
         self._data = storage.get_med(self._med_id)
